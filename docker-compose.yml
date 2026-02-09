@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  monitor:
+    build: .
+    container_name: sofascore_monitor
+    restart: unless-stopped
+    volumes:
+      - ./sofascore_monitor.db:/app/sofascore_monitor.db
+      - ./monitor.log:/app/monitor.log
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
