@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 
 # Import local modules
 from models import User, Bet
-from client import SofascoreClient
-from config import TARGET_USERS, POLL_INTERVAL_SECONDS, DB_PATH, MAX_RETRIES, PAUSE_DURATION_MINUTES, RETENTION_DAYS
+from client import SofascoreClient, UserNotFoundError
+from config import TARGET_USERS, POLL_INTERVAL_SECONDS, DB_PATH, MAX_RETRIES, PAUSE_DURATION_MINUTES, RETENTION_DAYS, TOP_PREDICTORS_LIMIT
 from storage import Storage
 from notifications import send_discord_alert
 
@@ -61,7 +61,7 @@ class Monitor:
 
     async def discover_users(self):
         """Fetch top predictors and add them to the monitoring list."""
-        logger.info("Auto-discovering Top Predictors...")
+        logger.info(f"Auto-discovering Top {TOP_PREDICTORS_LIMIT} Predictors...")
         data = await self.client.get_top_predictors()
         if not data or 'ranking' not in data:
             logger.warning("Failed to fetch top predictors.")
@@ -69,7 +69,10 @@ class Monitor:
 
         count = 0
         for row in data['ranking']:
-            uid = row.get('id')
+            if count >= TOP_PREDICTORS_LIMIT:
+                break
+
+            uid = str(row.get('id'))
             name = row.get('nickname') or row.get('slug') or "Unknown"
             
             if not uid:
@@ -78,7 +81,39 @@ class Monitor:
             if any(u.id == uid for u in self.users):
                 continue
                 
-            new_user = User(id=uid, name=name, slug=row.get('slug', name))
+            # Extract Stats
+            # JSON 'roi' = Profit (Units). 'percentage' = Win Rate. Real ROI must be calculated.
+            roi_percent = 0.0
+            profit_units = 0.0
+            win_rate_val = 0.0
+            
+            stats = row.get('voteStatistics', {}).get('allTime', {})
+            if stats:
+                # Profit
+                profit_units = float(stats.get('roi', 0.0) or 0.0)
+                
+                # Win Rate
+                wr_str = stats.get('percentage', '0').replace('%', '')
+                if wr_str.isdigit() or wr_str.replace('.', '', 1).isdigit():
+                    win_rate_val = float(wr_str)
+                
+                # ROI (Yield) = Profit / Total Bets * 100 (assuming flat stakes)
+                total_bets = 0
+                total_str = str(stats.get('total', '0'))
+                if total_str.isdigit():
+                    total_bets = int(total_str)
+                
+                if total_bets > 0:
+                    roi_percent = (profit_units / total_bets) * 100
+
+            new_user = User(
+                id=uid, 
+                name=name, 
+                slug=row.get('slug', name),
+                roi=roi_percent,
+                profit=profit_units,
+                win_rate=win_rate_val
+            )
             self.users.append(new_user)
             count += 1
             
@@ -95,28 +130,35 @@ class Monitor:
 
     async def check_user(self, user: User):
         # 1. Check Rate Limit Status
-        failures, paused_until = self.storage.get_user_status(str(user.id))
+        failures, paused_until = await self.storage.get_user_status(str(user.id))
         if paused_until:
             if datetime.now() < paused_until:
-                logger.info(f"Skipping paused user {user.name} until {paused_until}")
+                # logger.info(f"Skipping paused user {user.name} until {paused_until}")
                 return
             else:
                 # Unpause
-                self.storage.reset_failure(str(user.id))
+                await self.storage.reset_failure(str(user.id))
 
         # 2. Fetch Bets
-        data = await self.client.get_user_predictions(user.id)
-        
+        try:
+            data = await self.client.get_user_predictions(user.id)
+        except UserNotFoundError:
+            logger.warning(f"User {user.name} (404) not found. Pausing.")
+            # 404 -> Trigger Long Pause
+            await self.storage.increment_failure(str(user.id), MAX_RETRIES, PAUSE_DURATION_MINUTES)
+            return
+
         if not data:
-            # Increment failure count
-            self.storage.increment_failure(str(user.id), MAX_RETRIES, PAUSE_DURATION_MINUTES)
+            # Other error -> Increment failure but DO NOT PAUSE (0 mins)
+            await self.storage.increment_failure(str(user.id), MAX_RETRIES, 0)
             return
         
         # Reset failures on success
         if failures > 0:
-            self.storage.reset_failure(str(user.id))
+            await self.storage.reset_failure(str(user.id))
 
         predictions = data.get('predictions', []) 
+        bets_by_match = {}
         
         for p in predictions:
             # Bet Parsing Logic
@@ -124,8 +166,15 @@ class Monitor:
             endpoint_id = p.get('id') 
             unique_key = str(bet_id or endpoint_id or f"{p.get('eventId')}_{p.get('vote')}")
             
+            # Check Status - Skip if match is already finished
+            status_type = p.get('status', {}).get('type')
+            if status_type == 'finished':
+                # Mark as seen so we don't process it again, but DON'T alert
+                await self.storage.add_seen(unique_key, str(user.id))
+                continue
+
             # Check DB
-            if self.storage.is_seen(unique_key):
+            if await self.storage.is_seen(unique_key):
                 continue
             
             # Use safe float conversion
@@ -143,6 +192,7 @@ class Monitor:
                 user_id=user.id,
                 event_id=p.get('eventId', 0),
                 sport=p.get('sportSlug', 'Unknown'),
+                match_name=f"{p.get('homeTeamName', 'Unknown')} vs {p.get('awayTeamName', 'Unknown')}",
                 market_name="Match Winner", 
                 choice_name=p.get('vote', 'Unknown'),
                 odds=odds,
@@ -152,9 +202,19 @@ class Monitor:
             )
             
             # Mark as seen in DB
-            self.storage.add_seen(unique_key, str(user.id))
+            await self.storage.add_seen(unique_key, str(user.id))
             
-            # Send Alert
-            logger.info(f"New bet found for {user.name}: {bet.choice_name} @ {bet.odds}")
-            send_discord_alert(user, bet)
-            print(f"[ALERT] {user.name} bet on {bet.choice_name} ({bet.odds})")
+            # Group by Event ID
+            eid = bet.event_id
+            if eid not in bets_by_match:
+                bets_by_match[eid] = []
+            bets_by_match[eid].append(bet)
+            
+        # Send Grouped Alerts
+        for eid, bets in bets_by_match.items():
+            if not bets: continue
+            
+            logger.info(f"Sending grouped alert for {user.name}: {len(bets)} bets on match {eid}")
+            send_discord_alert(user, bets)
+            for b in bets:
+                print(f"[ALERT] {user.name} bet on {b.match_name} ({b.market_name}: {b.choice_name})")
