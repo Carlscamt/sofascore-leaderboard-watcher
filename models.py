@@ -8,6 +8,9 @@ class User:
     name: str
     slug: str
     url: Optional[str] = None
+    roi: Optional[float] = None
+    profit: Optional[float] = None
+    win_rate: Optional[float] = None
 
 @dataclass
 class Bet:
@@ -15,6 +18,7 @@ class Bet:
     user_id: str
     event_id: int
     sport: str
+    match_name: str # Added for fuller details e.g. "Home vs Away"
     market_name: str
     choice_name: str
     odds: float

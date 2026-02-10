@@ -23,8 +23,9 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Legacy / Manual Monitoring
 POLL_INTERVAL_SECONDS = 60
+TOP_PREDICTORS_LIMIT = 10 # Only monitor the top N predictors
 TARGET_USERS = [
     # Example User (Replace with real Top Predictor IDs)
-    # Using 'Sofascore' (Team ID: 857093) as a placeholder to test connectivity
-    {"id": 857093, "name": "Sofascore", "slug": "sofascore"}, 
+    # Using 'Sofascore' (Team ID: 857093) as a placeholder - COMMENTED OUT to prevent 404s
+    # {"id": 857093, "name": "Sofascore", "slug": "sofascore"}, 
 ]

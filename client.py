@@ -13,6 +13,9 @@ from config import PROXY_URL
 
 logger = logging.getLogger(__name__)
 
+class UserNotFoundError(Exception):
+    pass
+
 class SofascoreClient:
     def __init__(self):
         self.base_url = "https://www.sofascore.com/api/v1"
@@ -61,14 +64,15 @@ class SofascoreClient:
             if response.status_code == 200:
                 return response.json()
             elif response.status_code == 404:
-                # Suppress 404 logs for cleaner output on invalid user guesses
-                return None
+                raise UserNotFoundError(f"User not found at {endpoint}")
             elif response.status_code == 429:
                 logger.warning("Rate limited (429).")
                 return None 
             else:
                 logger.warning(f"Error fetching {endpoint}: {response.status_code}")
                 return None
+        except UserNotFoundError:
+            raise
         except Exception as e:
             logger.error(f"Exception fetching {endpoint}: {e}")
             return None

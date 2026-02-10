@@ -26,6 +26,8 @@ A hardened, standalone tool to monitor Top Predictors on Sofascore and alert whe
     DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
     PROXY_URL=http://user:pass@host:port (Optional)
     ```
+    -   (Optional) Update `TARGET_USERS` if you want to track specific people manually.
+    -   (Optional) Set `TOP_PREDICTORS_LIMIT = 10` to control how many top users to monitor.
 
 ## Running
 
@@ -40,6 +42,18 @@ cd sofascore_monitor
 docker-compose up -d
 ```
 View logs with `docker-compose logs -f`.
+
+## Development
+
+### Running Tests
+This project includes a `pytest` suite for validation.
+```bash
+# Install test dependencies
+pip install pytest pytest-asyncio pytest-mock
+
+# Run tests
+pytest tests/
+```
 
 ## Hardening Details
 -   **User Pausing**: If a user fails to load 3 times in a row, they are paused for 30 minutes.
