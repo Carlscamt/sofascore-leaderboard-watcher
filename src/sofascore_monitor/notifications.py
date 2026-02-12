@@ -25,8 +25,8 @@ def send_discord_alert(user: User, bets: List[Bet]):
         bet_content = "\n".join(bet_lines)
 
         # Prepare Links
-        user_slug_encoded = quote(user.slug)
-        user_link = f"https://www.sofascore.com/user/{user_slug_encoded}/{user.id}"
+        # User Link: https://www.sofascore.com/user/profile/{user.id}
+        user_link = f"https://www.sofascore.com/user/profile/{user.id}"
         
         # Match Link (use first bet)
         slug = first_bet.event_slug or "match"
