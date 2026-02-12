@@ -47,30 +47,48 @@ class Monitor:
     def calculate_adaptive_interval(self, base_minutes):
         """
         Pure time-based adaptive polling.
-        Returns: seconds to sleep before next poll.
+        Burst Mode: 60s interval during T-6 to T-1 mins before :00, :15, :30, :45 matches.
+        Standard Mode: Base * Multiplier (Weekends 0.8x) +/- 20% Jitter.
         """
-        MIN_INTERVAL = 180  # Hard floor: 3 minutes minimum
-        
+        MIN_INTERVAL = 180  # Hard floor for standard mode (3 mins)
+        BURST_INTERVAL = 60 # Fast poll for start times
+
         try:
-            # Use London time as proxy for Sofascore activity
-            now = datetime.now(pytz.timezone('Europe/London'))
+            # Use UTC as global standard
+            now = datetime.now(pytz.utc)
         except Exception:
-            now = datetime.now()
+            now = datetime.utcnow()
             
-        hour = now.hour
+        current_minute = now.minute
         
-        if 18 <= hour <= 23:  # Peak betting
-            multiplier = random.uniform(0.7, 1.0)
-        elif 0 <= hour <= 6:  # Late night
-            multiplier = random.uniform(2.0, 3.0)
-        else:  # Business hours
-            multiplier = random.uniform(0.9, 1.4)
+        # --- Burst Mode Check ---
+        # Matches often start at :00, :15, :30, :45
+        # We want to poll frequently in the 5 mins leading up to these (e.g., :09-:14)
+        # 15 min cycle: 0-14, 15-29, 30-44, 45-59
+        # Check if we are in the last 6 minutes of a 15-min block
+        # Modulo 15: 
+        # 0..8 -> Normal
+        # 9..14 -> Burst (Approaching start time)
         
-        # Weekend adjustment
+        rem = current_minute % 15
+        if 9 <= rem <= 14:
+            # Burst Mode
+            # logger.info("Burst Mode Active (Match Start approaching)")
+            return BURST_INTERVAL
+
+        # --- Standard Adaptive Mode ---
+        # 1. Base Multiplier
+        multiplier = 1.0
+        
+        # Weekend adjustment (Global high traffic)
+        # Weekday 5 (Sat), 6 (Sun)
         if now.weekday() >= 5:
-            multiplier *= 0.85
+            multiplier = 0.8
         
-        interval = int(base_minutes * 60 * multiplier)
+        # 2. Random Jitter (+/- 20%)
+        jitter = random.uniform(0.8, 1.2)
+        
+        interval = int(base_minutes * 60 * multiplier * jitter)
         return max(interval, MIN_INTERVAL)
 
     async def run(self):
@@ -99,7 +117,8 @@ class Monitor:
                 sleep_time = self.calculate_adaptive_interval(SCAN_INTERVAL_MINUTES) - elapsed
                 
                 if sleep_time > 0:
-                    logger.info(f"Sleeping for {sleep_time:.2f}s (Adaptive)...")
+                    mode = "Burst" if sleep_time == 60 else "Adaptive"
+                    logger.info(f"Sleeping for {sleep_time:.2f}s ({mode})...")
                     await asyncio.sleep(sleep_time)
                 else:
                     logger.warning(f"Loop took longer than interval ({elapsed:.2f}s)!")
