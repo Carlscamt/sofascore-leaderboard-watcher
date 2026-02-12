@@ -490,14 +490,16 @@ class Monitor:
 
                     # Check Status
                     status_type = p.get('status', {}).get('type')
-                    if status_type == 'finished':
+                    if status_type in ('finished', 'canceled', 'interrupted', 'aborted'):
                         correct = p.get('correct') # 1 = Won, -1 = Lost, 0 = Void?
-                        # Verify 'correct' values from API debug (1, -1 seen)
                         
                         new_status = 'PENDING'
                         profit = 0.0
                         
-                        if correct == 1:
+                        if status_type in ('canceled', 'interrupted', 'aborted') or correct == 0:
+                            new_status = 'VOID'
+                            profit = 0.0
+                        elif correct == 1:
                             new_status = 'WON'
                             odds = bet_row['odds']
                             stake = bet_row['stake']
@@ -506,7 +508,6 @@ class Monitor:
                             new_status = 'LOST'
                             stake = bet_row['stake']
                             profit = -stake
-                        elif correct == 0 or status_type == 'canceled':
                             new_status = 'VOID'
                             profit = 0.0
                         
