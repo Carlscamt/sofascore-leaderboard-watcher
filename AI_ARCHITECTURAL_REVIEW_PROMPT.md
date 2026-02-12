@@ -18,12 +18,14 @@
 ### A. Monitor (`monitor.py`)
 -   **Discovery**: Fetches global leaderboard.
 -   **Polling Strategy**:
-    -   *Recent Change*: Implemented **Randomized Jitter**. Instead of a fixed 60s, it sleeps for `POLL_INTERVAL * random.uniform(0.9, 1.25)` (approx 54s - 75s) to evade static analysis bot detection.
+    -   *Recent Change*: Configurable `SCAN_INTERVAL_MINUTES` (Default 5 mins).
+    -   *Logic*: Sleeps for `SCAN_INTERVAL * 60` seconds (plus jitter) between checks.
 -   **Logic**:
-    1.  Checks "Strike System" (paused users).
-    2.  Fetches predictions.
-    3.  Filters: Deduplication (SQLite), Finished Matches.
-    4.  **Grouping**: Batches bets by `event_id` to send single, clean alerts per match.
+    1.  **Auto-Discovery**: Fetches top predictors and applies filters (`MIN_ROI`, `MIN_AVG_ODDS`).
+    2.  Check "Strike System" (paused users).
+    3.  Fetch predictions.
+    4.  **Time Filter**: Skips matches starting > 24h away or started > 5m ago.
+    5.  **Grouping**: Batches bets by `event_id` to send single, clean alerts per match.
 
 ### B. Storage (`storage.py`)
 -   **Async Wrapper**: Uses `run_in_executor` pattern (via `to_thread`) for all `sqlite3` calls.

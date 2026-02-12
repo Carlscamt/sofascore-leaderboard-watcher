@@ -2,8 +2,8 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime, timedelta
-from monitor import Monitor
-from models import User, Bet
+from sofascore_monitor.monitor import Monitor
+from sofascore_monitor.models import User, Bet
 
 @pytest.fixture
 def mock_client():
@@ -17,8 +17,8 @@ def mock_storage():
 
 @pytest.fixture
 def monitor(mock_client, mock_storage):
-    with patch('monitor.SofascoreClient', return_value=mock_client), \
-         patch('monitor.Storage', return_value=mock_storage):
+    with patch('sofascore_monitor.monitor.SofascoreClient', return_value=mock_client), \
+         patch('sofascore_monitor.monitor.Storage', return_value=mock_storage):
         monitor = Monitor(use_auto_discovery=False)
         monitor.users = [User(id="123", name="Test User", slug="test-user")]
         return monitor
@@ -49,7 +49,7 @@ async def test_discover_users_limit(monitor):
     
     # We need to patch config.TOP_PREDICTORS_LIMIT, but it's imported into monitor module
     # So we patch monitor.TOP_PREDICTORS_LIMIT
-    with patch('monitor.TOP_PREDICTORS_LIMIT', 5):
+    with patch('sofascore_monitor.monitor.TOP_PREDICTORS_LIMIT', 5):
         await monitor.discover_users()
         
     # Should only have 1 (from init) + 5 discovered
@@ -109,7 +109,7 @@ async def test_new_bet_alert(monitor):
     # Simulate not seen in DB
     monitor.storage.is_seen.return_value = False
     
-    with patch('monitor.send_discord_alert') as mock_alert:
+    with patch('sofascore_monitor.monitor.send_discord_alert') as mock_alert:
         await monitor.check_user(monitor.users[0])
         
         # Verify DB add

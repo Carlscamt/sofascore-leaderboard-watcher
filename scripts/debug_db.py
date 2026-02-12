@@ -1,6 +1,14 @@
 import sqlite3
 import os
-from config import DB_PATH
+import sys
+from pathlib import Path
+
+# Add src to path
+current_dir = Path(__file__).parent.resolve()
+project_root = current_dir.parent
+sys.path.append(str(project_root / "src"))
+
+from sofascore_monitor.config import DB_PATH
 from datetime import datetime
 
 def check_db():

@@ -19,6 +19,7 @@ COPY . .
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
 
 # Run the monitor
 CMD ["python", "main.py"]

@@ -2,11 +2,11 @@ import sys
 import logging
 from pathlib import Path
 
-# Add project root to path
+# Add src to path
 current_dir = Path(__file__).parent.resolve()
-sys.path.append(str(current_dir))
+src_path = current_dir / "src"
+sys.path.append(str(src_path))
 
-# Configure logging
 # Configure logging
 # Force UTF-8 for Windows console
 if sys.platform == "win32":
@@ -23,7 +23,7 @@ logging.basicConfig(
     ]
 )
 
-from monitor import Monitor
+from sofascore_monitor.monitor import Monitor
 import asyncio
 
 def main():

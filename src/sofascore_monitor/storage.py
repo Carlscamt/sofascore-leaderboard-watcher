@@ -39,6 +39,18 @@ class Storage:
                         last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                
+                # Line Movement Tracking
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS latest_odds (
+                        bet_id TEXT PRIMARY KEY,
+                        odds REAL NOT NULL,
+                        previous_odds REAL,
+                        updated_at INTEGER NOT NULL,
+                        alert_sent INTEGER DEFAULT 0
+                    ) WITHOUT ROWID
+                """)
+                
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to init DB: {e}")
@@ -134,13 +146,15 @@ class Storage:
             logger.error(f"Error resetting failure: {e}")
 
     def cleanup_old_data(self, days: int):
-        # Run sync on startup is fine, or wrap if strictly needed
         try:
-            cutoff = datetime.now() - timedelta(days=days)
+            cutoff_dt = datetime.now() - timedelta(days=days)
+            cutoff_ts = int(cutoff_dt.timestamp())
+            
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("DELETE FROM seen_bets WHERE created_at < ?", (cutoff,))
+                conn.execute("DELETE FROM seen_bets WHERE created_at < ?", (cutoff_dt,))
+                conn.execute("DELETE FROM latest_odds WHERE updated_at < ?", (cutoff_ts,))
                 conn.commit()
-            logger.info(f"Cleaned up bets older than {days} days.")
+            logger.info(f"Cleaned up bets/odds older than {days} days.")
         except Exception as e:
             logger.error(f"Error cleaning old data: {e}")
 
@@ -154,3 +168,60 @@ class Storage:
         except Exception as e:
             logger.error(f"Error loading user bets: {e}")
             return set()
+
+    # --- Line Movement Tracking ---
+
+    async def get_odds_snapshot(self, bet_id: str) -> Optional[dict]:
+        return await asyncio.to_thread(self._get_odds_snapshot_sync, bet_id)
+
+    def _get_odds_snapshot_sync(self, bet_id: str) -> Optional[dict]:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Use row factory for dict
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("SELECT * FROM latest_odds WHERE bet_id = ?", (bet_id,))
+                row = cursor.fetchone()
+                if row:
+                    return dict(row)
+                return None
+        except Exception as e:
+            logger.error(f"Error getting odds snapshot: {e}")
+            return None
+
+    async def upsert_odds_snapshot(self, bet_id: str, odds: float, previous_odds: Optional[float]):
+        await asyncio.to_thread(self._upsert_odds_snapshot_sync, bet_id, odds, previous_odds)
+
+    def _upsert_odds_snapshot_sync(self, bet_id: str, odds: float, previous_odds: Optional[float]):
+        try:
+            updated_at = int(datetime.now().timestamp())
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO latest_odds (bet_id, odds, previous_odds, updated_at, alert_sent)
+                    VALUES (?, ?, ?, ?, 0)
+                    ON CONFLICT(bet_id) DO UPDATE SET
+                        odds = excluded.odds,
+                        previous_odds = excluded.previous_odds,
+                        updated_at = excluded.updated_at
+                        -- alert_sent is preserved? No, logic says separate update.
+                        -- Actually, if we upsert, we might want to preserve alert_sent unless explicitly reset?
+                        -- If we use 'DO UPDATE SET ...', fields not mentioned are preserved IF they existed?
+                        -- No, 'alert_sent' is omitted in SET list -> preserved?
+                        -- Wait, if row exists, we update odds/prev/updated_at. alert_sent remains whatever it was. Correct.
+                """, (bet_id, odds, previous_odds, updated_at))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error upserting odds snapshot: {e}")
+            
+    async def mark_alert_sent(self, bet_id: str):
+        await asyncio.to_thread(self._set_alert_flag_sync, bet_id, 1)
+
+    async def reset_alert_flag(self, bet_id: str):
+        await asyncio.to_thread(self._set_alert_flag_sync, bet_id, 0)
+        
+    def _set_alert_flag_sync(self, bet_id: str, flag: int):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("UPDATE latest_odds SET alert_sent = ? WHERE bet_id = ?", (flag, bet_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error setting alert flag: {e}")

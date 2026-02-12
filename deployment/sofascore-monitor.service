@@ -1,0 +1,45 @@
+[Unit]
+Description=Sofascore Leaderboard Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sofascore
+Group=sofascore
+WorkingDirectory=/opt/sofascore-monitor
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONPATH=/opt/sofascore-monitor/src"
+Environment="TZ=Europe/London"
+ExecStart=/opt/sofascore-monitor/venv/bin/python -u -m sofascore_monitor.main
+
+# Cleanup old odds data weekly on restart (prevent DB bloat)
+# Adjust python path and module import as needed based on installation
+ExecStartPre=/opt/sofascore-monitor/venv/bin/python -c "from sofascore_monitor.config import DB_PATH; from sofascore_monitor.storage import Storage; Storage(DB_PATH).cleanup_old_data(7)"
+
+# Restart on crashes
+Restart=on-failure
+RestartSec=60
+StartLimitBurst=5
+StartLimitIntervalSec=600
+
+# Resource limits (OLD HARDWARE)
+MemoryMax=400M
+MemoryHigh=350M
+CPUQuota=40%
+TasksMax=50
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/sofascore-monitor/data
+CapabilityBoundingSet=
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

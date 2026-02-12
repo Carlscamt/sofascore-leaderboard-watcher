@@ -1,6 +1,15 @@
 import asyncio
 import json
-from client import SofascoreClient
+import sys
+import os
+from pathlib import Path
+
+# Add src to path
+current_dir = Path(__file__).parent.resolve()
+project_root = current_dir.parent
+sys.path.append(str(project_root / "src"))
+
+from sofascore_monitor.client import SofascoreClient
 
 async def check_stats():
     client = SofascoreClient()

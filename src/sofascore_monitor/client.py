@@ -9,7 +9,7 @@ except ImportError:
     import requests
     HAS_TLS = False
 
-from config import PROXY_URL
+from .config import PROXY_URL
 
 logger = logging.getLogger(__name__)
 

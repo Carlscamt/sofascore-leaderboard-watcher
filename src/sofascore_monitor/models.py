@@ -11,12 +11,18 @@ class User:
     roi: Optional[float] = None
     profit: Optional[float] = None
     win_rate: Optional[float] = None
+    # Current (Month/Competition) Stats
+    current_roi: Optional[float] = None
+    current_profit: Optional[float] = None
+    current_win_rate: Optional[float] = None
 
 @dataclass
 class Bet:
     id: str # Supports customId string
     user_id: str
     event_id: int
+    event_slug: Optional[str] # Correct field from API is 'eventSlug'
+    custom_id: Optional[str] # Added for match URL 'XfadswZfd'
     sport: str
     match_name: str # Added for fuller details e.g. "Home vs Away"
     market_name: str
@@ -24,6 +30,7 @@ class Bet:
     odds: float
     stake: Optional[float]
     status: str  # 'active', 'won', 'lost', etc.
+    start_time: Optional[datetime] # Match start time
     created_at: datetime
     
     def __eq__(self, other):

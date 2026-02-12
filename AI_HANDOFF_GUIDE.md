@@ -3,21 +3,22 @@
 ## 1. Project Overview
 **Goal**: Monitor specific "tipsters" (users) on Sofascore for new betting predictions and send real-time alerts to Discord.
 **Stack**: Python 3.10+, SQLite (Async/WAL), Discord Webhooks.
-**Key Libraries**: `aiohttp` (via `client.py`), `sqlite3`, `discord-webhook` (raw requests).
+**Structure**: `src`-layout package (`src/sofascore_monitor/`).
+**Key Libraries**: `aiohttp`, `sqlite3`, `discord-webhook`.
 
 ## 2. Architecture & Data Flow
-1.  **Monitor Loop (`monitor.py`)**: 
-    - Runs indefinitely with a jittered sleep interval (default ~60s).
+1.  **Monitor Loop (`src/sofascore_monitor/monitor.py`)**: 
+    - Runs indefinitely with a configurable scan interval (default 5 mins).
     - `check_all_users()` -> `check_user(user)` concurrently.
-2.  **Client (`client.py`)**: 
+2.  **Client (`src/sofascore_monitor/client.py`)**: 
     - Handles HTTP requests to Sofascore API.
     - Uses `tls_client` (if available) to bypass fingerprinting, falls back to `requests`.
     - Proxies support via `PROXY_URL`.
-3.  **Storage (`storage.py`)**: 
+3.  **Storage (`src/sofascore_monitor/storage.py`)**: 
     - Async wrapper around synchronous `sqlite3`.
     - Tables: `seen_bets` (deduplication), `user_status` (rate limiting/pausing).
-4.  **Notifications (`notifications.py`)**:
-    - Formats Discord embeds.
+4.  **Notifications (`src/sofascore_monitor/notifications.py`)**:
+    - Formats Discord embeds with rich stats (Current ROI/Profit).
     - Rate limit handling (429 retries).
 
 ## 3. Key Components & APIs
@@ -40,16 +41,18 @@
 - **`get_user_status(user_id)`** -> `(failures, paused_until)`: For individual circuit breaking.
 - **`increment_failure(...)`**: Triggers pause if `MAX_RETRIES` exceeded.
 
-### D. Data Models (`models.py`)
-- **`User`**: `id`, `name`, `roi`, `slug`.
-- **`Bet`**: `id` (unique key), `market_name`, `choice_name`, `odds`.
+### D. Data Models (`src/sofascore_monitor/models.py`)
+- **`User`**: `id`, `name`, `roi`, `slug`, `current_roi`, `current_profit`.
+- **`Bet`**: `id` (unique key), `market_name`, `choice_name`, `odds`, `start_time` (for filtering).
 
-## 4. Configuration (`config.py`) & Environment
+## 4. Configuration (`src/sofascore_monitor/config.py`) & Environment
 - **Private Keys**: `DISCORD_WEBHOOK_URL`, `PROXY_URL` (in `.env`).
 - **Tunables**: 
-    - `POLL_INTERVAL_SECONDS` (60s).
-    - `TOP_PREDICTORS_LIMIT` (10).
-    - `MAX_RETRIES` (3) / `PAUSE_DURATION_MINUTES` (30).
+    - `SCAN_INTERVAL_MINUTES` (Default: 5).
+    - `TOP_PREDICTORS_LIMIT` (Default: 10).
+- **Filters**:
+    - `MIN_ROI`, `MIN_AVG_ODDS`, `MIN_TOTAL_BETS` (User filters).
+    - `TIME_LOOKAHEAD_HOURS` (24), `MATCH_GRACE_PERIOD_MINUTES` (5).
 
 ## 5. Instructions for AI Agents
 **Context**: You are an autonomous developer agent.

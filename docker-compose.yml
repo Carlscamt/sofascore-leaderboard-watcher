@@ -6,7 +6,7 @@ services:
     container_name: sofascore_monitor
     restart: unless-stopped
     volumes:
-      - ./sofascore_monitor.db:/app/sofascore_monitor.db
+      - ./data/sofascore_monitor.db:/app/data/sofascore_monitor.db
       - ./monitor.log:/app/monitor.log
       - ./.env:/app/.env
     environment:
