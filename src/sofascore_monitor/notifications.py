@@ -1,6 +1,7 @@
 import logging
 import requests
 import json
+from datetime import datetime
 from urllib.parse import quote
 from typing import List
 from .models import Bet, User
@@ -27,7 +28,7 @@ def send_discord_alert(user: User, bets: List[Bet]):
         user_slug_encoded = quote(user.slug)
         user_link = f"https://www.sofascore.com/user/{user_slug_encoded}/{user.id}"
         
-        # Match Link
+        # Match Link (use first bet)
         slug = first_bet.event_slug or "match"
         sport = first_bet.sport or "sport"
         custom_id = first_bet.custom_id
@@ -35,21 +36,61 @@ def send_discord_alert(user: User, bets: List[Bet]):
         if custom_id:
              match_link = f"https://www.sofascore.com/{sport}/match/{slug}/{custom_id}#id:{first_bet.event_id}"
         else:
-             # Fallback
              match_link = f"https://www.sofascore.com/{slug}/{first_bet.event_id}"
 
+        # Determine Color (Green if profitable in either All-time or Current)
+        is_profitable = (user.roi is not None and user.roi > 0) or (user.current_roi is not None and user.current_roi > 0)
+        color = 3447003 if is_profitable else 10181046 # Green (0x349933) vs Grey (0x9B9B96)
+
+        # Build Bets Field
+        bet_field_lines = []
+        for i, bet in enumerate(bets):
+            # 🎯 Highlight high confidence or simply the selection
+            icon = "🎯" 
+            bet_line = f"**{i+1}.** {bet.market_name}: {bet.choice_name} @ **{bet.odds}** {icon}"
+            bet_field_lines.append(bet_line)
+        
+        bets_value = "\n".join(bet_field_lines)
+
+        # Stats Icons
+        icon_all = "⚪"
+        icon_cur = "🟢" if (user.current_roi and user.current_roi > 10) else "⚪"
+
         embed = {
-            "title": "🚨 New Bet Alert!",
-            "color": 5814783, # Greenish
+            "title": "⚽️ NEW BET ALERT",
+            "color": color,
             "fields": [
-                {"name": "Predictor", "value": f"[{user.name}]({user_link})", "inline": True},
-                {"name": "Stats (All Time)", "value": f"ROI: {user.roi or 0:.1f}% | Profit: {user.profit or 0:.0f} | Win: {user.win_rate or 0:.1f}%", "inline": True},
-                {"name": "Stats (Current)", "value": f"ROI: {user.current_roi or 0:.1f}% | Profit: {user.current_profit or 0:.0f} | Win: {user.current_win_rate or 0:.1f}%", "inline": True},
-                {"name": "Sport", "value": first_bet.sport, "inline": False},
-                {"name": "Match", "value": f"[{first_bet.match_name}]({match_link})", "inline": False},
-                {"name": "Bets", "value": bet_content, "inline": False},
+                {
+                    "name": "🔮 Predictor",
+                    "value": f"[{user.name}]({user_link})",
+                    "inline": True
+                },
+                {
+                    "name": "📊 Performance",
+                    "value": (
+                        f"**All Time** {icon_all}\n"
+                        f"ROI: **{user.roi or 0:.1f}%** | P&L: **{user.profit or 0:+.0f}** | Win: **{user.win_rate or 0:.0f}%**\n\n"
+                        f"**Current** {icon_cur}\n"
+                        f"ROI: **{user.current_roi or 0:.1f}%** | P&L: **{user.current_profit or 0:+.0f}** | Win: **{user.current_win_rate or 0:.0f}%**"
+                    ),
+                    "inline": True
+                },
+                {
+                    "name": "⚽️ Match",
+                    "value": f"[{first_bet.match_name}]({match_link})",
+                    "inline": False
+                },
+                {
+                    "name": f"🎯 Bets ({len(bets)})",
+                    "value": bets_value,
+                    "inline": False
+                }
             ],
-            "footer": {"text": f"Sofascore Monitor • Antigravity • {len(bets)} new bet(s)"}
+            "footer": {
+                "text": "Sofascore Monitor • Antigravity",
+                # "icon_url": "https://your-logo-url.png" # Placeholder
+            },
+            "timestamp": datetime.utcnow().isoformat()
         }
 
         payload = {
