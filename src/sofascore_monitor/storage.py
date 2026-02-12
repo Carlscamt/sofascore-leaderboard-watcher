@@ -12,9 +12,16 @@ class Storage:
         self.db_path = db_path
         self._init_db()
 
+    def _get_connection(self):
+        """Helper to get connection with timeout and WAL mode."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        return conn
+
     def _init_db(self):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 # Enable WAL mode for better concurrency
                 conn.execute("PRAGMA journal_mode=WAL;")
                 
@@ -60,7 +67,7 @@ class Storage:
 
     def _is_seen_sync(self, bet_id: str) -> bool:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.execute("SELECT 1 FROM seen_bets WHERE id = ?", (bet_id,))
                 return cursor.fetchone() is not None
         except Exception as e:
@@ -72,7 +79,7 @@ class Storage:
 
     def _add_seen_sync(self, bet_id: str, user_id: str):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO seen_bets (id, user_id) VALUES (?, ?)",
                     (bet_id, user_id)
@@ -87,7 +94,7 @@ class Storage:
     def _get_user_status_sync(self, user_id: str) -> Tuple[int, Optional[datetime]]:
         """Return (failures, paused_until)."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.execute("SELECT failures, paused_until FROM user_status WHERE user_id = ?", (user_id,))
                 row = cursor.fetchone()
                 if row:
@@ -104,7 +111,7 @@ class Storage:
 
     def _increment_failure_sync(self, user_id: str, max_retries: int, pause_minutes: int):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 # Get current failures
                 cursor = conn.execute("SELECT failures FROM user_status WHERE user_id = ?", (user_id,))
                 row = cursor.fetchone()
@@ -132,7 +139,7 @@ class Storage:
 
     def _reset_failure_sync(self, user_id: str):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.execute("""
                     INSERT INTO user_status (user_id, failures, paused_until, last_updated)
                     VALUES (?, 0, NULL, CURRENT_TIMESTAMP)
@@ -150,7 +157,7 @@ class Storage:
             cutoff_dt = datetime.now() - timedelta(days=days)
             cutoff_ts = int(cutoff_dt.timestamp())
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.execute("DELETE FROM seen_bets WHERE created_at < ?", (cutoff_dt,))
                 conn.execute("DELETE FROM latest_odds WHERE updated_at < ?", (cutoff_ts,))
                 conn.commit()
@@ -162,7 +169,7 @@ class Storage:
     def get_user_seen_bets(self, user_id: str) -> Set[str]:
         """Load all seen bets for a user into a set."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.execute("SELECT id FROM seen_bets WHERE user_id = ?", (user_id,))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
@@ -176,7 +183,7 @@ class Storage:
 
     def _get_odds_snapshot_sync(self, bet_id: str) -> Optional[dict]:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 # Use row factory for dict
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute("SELECT * FROM latest_odds WHERE bet_id = ?", (bet_id,))
@@ -194,7 +201,7 @@ class Storage:
     def _upsert_odds_snapshot_sync(self, bet_id: str, odds: float, previous_odds: Optional[float]):
         try:
             updated_at = int(datetime.now().timestamp())
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.execute("""
                     INSERT INTO latest_odds (bet_id, odds, previous_odds, updated_at, alert_sent)
                     VALUES (?, ?, ?, ?, 0)
@@ -220,7 +227,7 @@ class Storage:
         
     def _set_alert_flag_sync(self, bet_id: str, flag: int):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.execute("UPDATE latest_odds SET alert_sent = ? WHERE bet_id = ?", (flag, bet_id))
                 conn.commit()
         except Exception as e:
