@@ -8,6 +8,7 @@ load_dotenv()
 ENABLE_CONSOLE_LOGS = os.getenv("ENABLE_CONSOLE_LOGS", "True").lower() == "true"
 ENABLE_DESKTOP_NOTIFICATIONS = os.getenv("ENABLE_DESKTOP_NOTIFICATIONS", "True").lower() == "true"
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_HEALTH_WEBHOOK_URL = os.getenv("DISCORD_HEALTH_WEBHOOK_URL", "")
 PROXY_URL = os.getenv("PROXY_URL", "") # Format: http://user:pass@host:port
 
 # Persistence

@@ -25,7 +25,7 @@ from .config import (
     MATCH_GRACE_PERIOD_MINUTES
 )
 from .storage import Storage
-from .notifications import send_discord_alert, send_line_movement_alert
+from .notifications import send_discord_alert, send_line_movement_alert, send_health_alert
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,9 @@ class Monitor:
         if self.use_auto_discovery:
             await self.discover_users()
 
-        logger.info(f"Monitoring {len(self.users)} users with {SCAN_INTERVAL_MINUTES}m base interval.")
+        msg = f"Monitoring {len(self.users)} users with {SCAN_INTERVAL_MINUTES}m base interval (UTC/Burst Mode Active)."
+        logger.info(msg)
+        send_health_alert("Service Started", msg, color=0x00FF00)
         
         while True:
             try:
@@ -125,6 +127,7 @@ class Monitor:
                     
             except Exception as e:
                 logger.error(f"Error in monitor loop: {e}", exc_info=True)
+                send_health_alert("Service Error", f"Exception in monitor loop: {str(e)}", color=0xFF0000)
                 await asyncio.sleep(60) # Backoff on crash
 
     async def discover_users(self):

@@ -4,7 +4,7 @@ import json
 from urllib.parse import quote
 from typing import List
 from .models import Bet, User
-from .config import DISCORD_WEBHOOK_URL
+from .config import DISCORD_WEBHOOK_URL, DISCORD_HEALTH_WEBHOOK_URL
 
 logger = logging.getLogger(__name__)
 
@@ -130,3 +130,27 @@ def send_line_movement_alert(bet: Bet, previous_odds: float, movement_pct: float
 
     except Exception as e:
         logger.error(f"Error sending line movement alert: {e}")
+
+def send_health_alert(status: str, message: str, color: int = 0x00FF00):
+   """
+   Send system health alerts (Startup, Error, Shutdown).
+   Color: Green (0x00FF00) for info, Red (0xFF0000) for errors.
+   """
+   if not DISCORD_HEALTH_WEBHOOK_URL:
+       return
+
+   from datetime import datetime
+   embed = {
+       "title": f"System Alert: {status}",
+       "description": message,
+       "color": color,
+       "timestamp": datetime.utcnow().isoformat(),
+       "footer": {"text": "Sofascore Monitor Health"}
+   }
+   
+   payload = {"embeds": [embed]}
+   
+   try:
+       requests.post(DISCORD_HEALTH_WEBHOOK_URL, json=payload, timeout=5)
+   except Exception as e:
+       logger.error(f"Failed to send health alert: {e}")
