@@ -1,3 +1,7 @@
+import asyncio
+import logging
+from typing import Optional, Dict, Any
+
 try:
     from curl_cffi import requests as curl_requests
     HAS_CURL = True
