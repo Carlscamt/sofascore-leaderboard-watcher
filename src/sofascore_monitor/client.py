@@ -1,15 +1,11 @@
-import asyncio
-import logging
-from typing import Optional, Dict, Any
-
 try:
-    from tls_client import Session
-    HAS_TLS = True
+    from curl_cffi import requests as curl_requests
+    HAS_CURL = True
 except ImportError:
     import requests
-    HAS_TLS = False
+    HAS_CURL = False
 
-from .config import PROXY_URL
+from .config import PROXY_URL, USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -20,23 +16,26 @@ class SofascoreClient:
     def __init__(self):
         self.base_url = "https://www.sofascore.com/api/v1"
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
             "Accept": "application/json",
             "Referer": "https://www.sofascore.com/",
+            # UA is handled by impersonate, but we can set a fallback or specific one if needed
         }
         
         # Proxy Configuration
         self.proxy = None
         if PROXY_URL:
              self.proxy = PROXY_URL
-             logger.info(f"Using Proxy: {PROXY_URL.split('@')[-1]}") # Log host only
+             logger.info(f"Using Proxy: {PROXY_URL.split('@')[-1]}")
 
-        # Current tls_client is blocking, so we'll run it in threads
-        if HAS_TLS:
-            self.session = Session(client_identifier="firefox_120")
+        if HAS_CURL:
+            # Use chrome120 impersonation
+            self.session = curl_requests.Session(impersonate="chrome120")
+            if self.proxy:
+                self.session.proxies = {"http": self.proxy, "https": self.proxy}
         else:
              self.session = requests.Session()
              self.session.headers.update(self.headers)
+             self.session.headers["User-Agent"] = USER_AGENT
              if self.proxy:
                  self.session.proxies = {"http": self.proxy, "https": self.proxy}
 
@@ -49,14 +48,12 @@ class SofascoreClient:
     def _fetch_sync(self, endpoint: str) -> Optional[Dict[str, Any]]:
         url = f"{self.base_url}{endpoint}"
         try:
-            if HAS_TLS:
-                # tls_client .get() is blocking
-                # tls_client uses 'proxy' arg, not 'proxies' dict
+            if HAS_CURL:
+                # curl_cffi session
                 response = self.session.get(
                     url, 
                     headers=self.headers, 
-                    timeout_seconds=15,
-                    proxy=self.proxy
+                    timeout=15
                 )
             else:
                 response = self.session.get(url, timeout=10)
@@ -68,6 +65,9 @@ class SofascoreClient:
             elif response.status_code == 429:
                 logger.warning("Rate limited (429).")
                 return None 
+            elif response.status_code == 403:
+                logger.warning(f"403 Forbidden at {endpoint} (Anti-Bot Triggered)")
+                return None
             else:
                 logger.warning(f"Error fetching {endpoint}: {response.status_code}")
                 return None
