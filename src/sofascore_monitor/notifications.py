@@ -195,3 +195,37 @@ def send_health_alert(status: str, message: str, color: int = 0x00FF00):
        requests.post(DISCORD_HEALTH_WEBHOOK_URL, json=payload, timeout=5)
    except Exception as e:
        logger.error(f"Failed to send health alert: {e}")
+
+def send_roi_report(stats: dict):
+    if not DISCORD_WEBHOOK_URL or not stats:
+        return
+
+    try:
+        total = stats.get('total_bets', 0)
+        wins = stats.get('wins', 0)
+        profit = stats.get('profit', 0.0)
+        roi = stats.get('roi', 0.0)
+        win_rate = stats.get('win_rate', 0.0)
+
+        color = 3447003 if profit > 0 else 10181046 # Green vs Grey
+        
+        embed = {
+            "title": "📈 Monitor ROI Report",
+            "color": color,
+            "fields": [
+                {"name": "Total Prediction Alerts", "value": str(total), "inline": True},
+                {"name": "Wins", "value": str(wins), "inline": True},
+                {"name": "Win Rate", "value": f"{win_rate:.1f}%", "inline": True},
+                {"name": "Total Profit (Units)", "value": f"{profit:+.2f}", "inline": True},
+                {"name": "ROI (Yield)", "value": f"**{roi:+.2f}%**", "inline": True},
+            ],
+            "footer": {"text": "Sofascore Monitor • Performance Tracking"},
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        payload = {"embeds": [embed]}
+        requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        logger.info(f"Sent ROI Report: {total} bets, {roi:.2f}% ROI")
+
+    except Exception as e:
+        logger.error(f"Error sending ROI report: {e}")

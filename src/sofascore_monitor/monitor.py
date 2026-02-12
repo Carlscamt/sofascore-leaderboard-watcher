@@ -25,7 +25,7 @@ from .config import (
     MATCH_GRACE_PERIOD_MINUTES
 )
 from .storage import Storage
-from .notifications import send_discord_alert, send_line_movement_alert, send_health_alert
+from .notifications import send_discord_alert, send_line_movement_alert, send_health_alert, send_roi_report
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,10 @@ class Monitor:
             
         # Resource Bounding
         self.http_semaphore = asyncio.BoundedSemaphore(5)
+
+        # ROI Resolution
+        self.last_resolution_check = datetime.now() - timedelta(hours=1) # Run immediately on startup
+
             
     def calculate_adaptive_interval(self, base_minutes):
         """
@@ -105,6 +109,11 @@ class Monitor:
         logger.info(msg)
         send_health_alert("Service Started", msg, color=0x00FF00)
         
+        # Send Initial ROI Report
+        roi_stats = await self.storage.get_roi_stats()
+        if roi_stats and roi_stats.get('total_bets', 0) > 0:
+             send_roi_report(roi_stats)
+        
         while True:
             try:
                 start_time = datetime.now()
@@ -115,6 +124,11 @@ class Monitor:
                 
                 # Check Health (Dead Man's Switch logic could go here or external)
                 
+                # ROI Resolution (Every 1 hour)
+                if (datetime.now() - self.last_resolution_check).total_seconds() > 3600:
+                    asyncio.create_task(self.resolve_pending_bets())
+                    self.last_resolution_check = datetime.now()
+
                 # Adaptive Interval
                 sleep_time = self.calculate_adaptive_interval(SCAN_INTERVAL_MINUTES) - elapsed
                 
@@ -411,3 +425,96 @@ class Monitor:
             send_discord_alert(user, bets)
             for b in bets:
                 print(f"[ALERT] {user.name} bet on {b.match_name} ({b.market_name}: {b.choice_name})")
+                # Store for ROI Tracking
+                await self.storage.store_alerted_bet(
+                    bet_id=b.id,
+                    user_id=user.id,
+                    event_id=b.event_id,
+                    market=b.market_name,
+                    selection=b.choice_name,
+                    odds=b.odds
+                )
+    async def resolve_pending_bets(self):
+        """Check status of pending bets and update ROI stats."""
+        logger.info("Starting ROI Resolution Task...")
+        pending = await self.storage.get_pending_bets()
+        if not pending:
+            logger.info("No pending bets to resolve.")
+            return
+
+        # Group by user to minimize requests
+        bets_by_user = {}
+        for row in pending:
+            uid = row['user_id']
+            if uid not in bets_by_user:
+                bets_by_user[uid] = []
+            bets_by_user[uid].append(row)
+
+        for user_id, bets in bets_by_user.items():
+            try:
+                # Fetch user history (Page 0 should cover recent settled bets)
+                # If bets are old, might need page 1, but 1h loop should catch them as they settle.
+                data = await self.client.get_user_predictions(user_id, page=0)
+                if not data: continue
+
+                predictions = data.get('predictions', [])
+                
+                # Create a map for fast lookup: event_id -> prediction
+                # Also maps event_id+vote to prediction for precise matching
+                pred_map = {}
+                for p in predictions:
+                    eid = p.get('eventId')
+                    if eid:
+                        pred_map[eid] = p
+                        # Also composite key if needed
+                        vote = p.get('vote')
+                        if vote:
+                            pred_map[f"{eid}_{vote}"] = p
+
+                for bet_row in bets:
+                    bet_id = bet_row['id']
+                    eid = bet_row['event_id']
+                    selection = bet_row['selection']
+                    
+                    # Try to find match
+                    # 1. Exact match event_id + selection
+                    p = pred_map.get(f"{eid}_{selection}")
+                    # 2. Fallback event_id (if selection format matches differently, but usually '1', '2', 'X')
+                    if not p:
+                        p = pred_map.get(eid)
+                        # Check selection match if fallback used
+                        if p and str(p.get('vote')) != str(selection):
+                            p = None
+                    
+                    if not p: continue
+
+                    # Check Status
+                    status_type = p.get('status', {}).get('type')
+                    if status_type == 'finished':
+                        correct = p.get('correct') # 1 = Won, -1 = Lost, 0 = Void?
+                        # Verify 'correct' values from API debug (1, -1 seen)
+                        
+                        new_status = 'PENDING'
+                        profit = 0.0
+                        
+                        if correct == 1:
+                            new_status = 'WON'
+                            odds = bet_row['odds']
+                            stake = bet_row['stake']
+                            profit = (odds * stake) - stake
+                        elif correct == -1:
+                            new_status = 'LOST'
+                            stake = bet_row['stake']
+                            profit = -stake
+                        elif correct == 0 or status_type == 'canceled':
+                            new_status = 'VOID'
+                            profit = 0.0
+                        
+                        if new_status != 'PENDING':
+                            logger.info(f"Bet Resolved: {bet_id} -> {new_status} ({profit:+.2f})")
+                            await self.storage.update_bet_outcome(bet_id, new_status, profit)
+
+            except Exception as e:
+                logger.error(f"Error resolving bets for user {user_id}: {e}")
+                
+        logger.info("ROI Resolution Task Completed.")

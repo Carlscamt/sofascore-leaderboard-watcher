@@ -2,7 +2,7 @@ import sqlite3
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Set, Optional, Tuple
+from typing import Set, Optional, Tuple, List
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,24 @@ class Storage:
                     ) WITHOUT ROWID
                 """)
                 
+                # ROI Tracking Table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS alerted_bets (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        event_id INTEGER,
+                        market TEXT,
+                        selection TEXT,
+                        odds REAL,
+                        stake REAL DEFAULT 1.0,
+                        status TEXT DEFAULT 'PENDING',
+                        profit REAL DEFAULT 0.0,
+                        alerted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_alerted_bets_user ON alerted_bets(user_id);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_alerted_bets_status ON alerted_bets(status);")
+
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to init DB: {e}")
@@ -232,3 +250,82 @@ class Storage:
                 conn.commit()
         except Exception as e:
             logger.error(f"Error setting alert flag: {e}")
+    
+    # --- ROI Tracking ---
+
+    async def store_alerted_bet(self, bet_id: str, user_id: str, event_id: int, market: str, selection: str, odds: float):
+        await asyncio.to_thread(self._store_alerted_bet_sync, bet_id, user_id, event_id, market, selection, odds)
+
+    def _store_alerted_bet_sync(self, bet_id: str, user_id: str, event_id: int, market: str, selection: str, odds: float):
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT OR IGNORE INTO alerted_bets (id, user_id, event_id, market, selection, odds, alerted_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (bet_id, user_id, event_id, market, selection, odds))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error storing alerted bet: {e}")
+
+    async def get_pending_bets(self) -> List[dict]:
+        return await asyncio.to_thread(self._get_pending_bets_sync)
+
+    def _get_pending_bets_sync(self) -> List[dict]:
+        try:
+            with self._get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("SELECT * FROM alerted_bets WHERE status = 'PENDING'")
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting pending bets: {e}")
+            return []
+
+    async def update_bet_outcome(self, bet_id: str, status: str, profit: float):
+        await asyncio.to_thread(self._update_bet_outcome_sync, bet_id, status, profit)
+
+    def _update_bet_outcome_sync(self, bet_id: str, status: str, profit: float):
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    UPDATE alerted_bets 
+                    SET status = ?, profit = ? 
+                    WHERE id = ?
+                """, (status, profit, bet_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating bet outcome: {e}")
+
+    async def get_roi_stats(self) -> dict:
+        return await asyncio.to_thread(self._get_roi_stats_sync)
+
+    def _get_roi_stats_sync(self) -> dict:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT 
+                        COUNT(*) as total_bets,
+                        SUM(CASE WHEN status = 'WON' THEN 1 ELSE 0 END) as wins,
+                        SUM(profit) as total_profit,
+                        SUM(stake) as total_stake
+                    FROM alerted_bets 
+                    WHERE status IN ('WON', 'LOST', 'VOID')
+                """)
+                row = cursor.fetchone()
+                if row:
+                     total = row[0] or 0
+                     wins = row[1] or 0
+                     profit = row[2] or 0.0
+                     stake = row[3] or 0.0
+                     roi = (profit / stake * 100) if stake > 0 else 0.0
+                     win_rate = (wins / total * 100) if total > 0 else 0.0
+                     return {
+                         "total_bets": total,
+                         "wins": wins,
+                         "profit": profit,
+                         "roi": roi,
+                         "win_rate": win_rate
+                     }
+                return {}
+        except Exception as e:
+            logger.error(f"Error getting ROI stats: {e}")
+            return {}
